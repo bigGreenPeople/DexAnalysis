@@ -96,7 +96,9 @@ void dex_types(FILE * fp) {
 
 	for (int typeIndex = 0; typeIndex < dex_header->typeIdsSize; typeIndex++)
 	{
+		//得到类型的字符串索引
 		int stringIdx = dextypes[typeIndex].descriptorIdx;
+		//得到字符串长度
 		int string_length = get_string_size_by_id(fp, dexstrings, stringIdx) + 1;
 		char * temp = (char *)malloc(string_length);
 		memset(temp, 0, string_length);
@@ -104,6 +106,7 @@ void dex_types(FILE * fp) {
 		if (temp == NULL) {
 			goto end;
 		}
+		//得到字符串
 		bool result = get_string_by_id(fp, dexstrings, stringIdx, temp);
 		if (!result) {
 			free(temp);
