@@ -7,11 +7,17 @@ void help();
 void dex_header(FILE * fp);
 void dex_strings(FILE * fp, int page, int limit);
 void dex_types(FILE * fp);
+void dex_proto(FILE * fp);
 
 DexTypeId * get_dextypes(FILE * fp, u4 offset, int size);
+DexProtoId * get_dexprotos(FILE * fp, u4 offset, int size);
+
 int get_string_size_by_id(FILE *fp, DexStringId * dexstrings, int id);
+int get_param_size_by_offset(FILE *fp, DexStringId * dexstrings, DexTypeId * dextypes, u4 offset);
+
 DexStringId * get_dexstrings(FILE * fp, u4 offset, int size);
 bool get_string_by_id(FILE *fp, DexStringId * dexstrings, int id, char * buff);
+
 
 DexHeader* get_dex__header(FILE * fp);
 
@@ -40,7 +46,7 @@ int main(int argc, char* argv[]) {
 		exit(0);
 	}
 	printf("-----------------------------------------------------------------------------------------------------\n");
-	dex_types(fp);
+	dex_proto(fp);
 	/*if (!strcmp(argv[1], "-h")) {
 		dex_header(fp);
 	}
@@ -50,7 +56,8 @@ int main(int argc, char* argv[]) {
 	else if (!strcmp(argv[1], "-t")) {
 		dex_types(fp);
 	}
-	else if (!strcmp(argv[1], "-l")) {
+	else if (!strcmp(argv[1], "-p")) {
+		dex_proto(fp);
 	}
 	else if (!strcmp(argv[1], "-r")) {
 	}*/
@@ -67,6 +74,84 @@ int main(int argc, char* argv[]) {
 		}
 	}
 	return 0;
+}
+
+//解析类型表
+void dex_proto(FILE * fp) {
+	//得到dex头
+	DexHeader* dex_header = get_dex__header(fp);
+	if (dex_header == NULL) {
+		printf("dex_header error\n");
+		return;
+	}
+	//得到字符串表
+	DexStringId * dexstrings = get_dexstrings(fp, dex_header->stringIdsOff, dex_header->stringIdsSize);
+	if (dexstrings == NULL) {
+		printf("dexstrings error\n");
+		free(dex_header);
+		return;
+	}
+
+	//得到类型表
+	DexTypeId * dextypes = get_dextypes(fp, dex_header->typeIdsOff, dex_header->typeIdsSize);
+	if (dextypes == NULL) {
+		printf("dextypes error\n");
+		free(dexstrings);
+		free(dex_header);
+		return;
+	}
+	//得到方法声明表
+	DexProtoId * dexprotos = get_dexprotos(fp, dex_header->protoIdsOff, dex_header->protoIdsSize);
+	if (dexprotos == NULL) {
+		printf("dexprotos error\n");
+		free(dextypes);
+		free(dexstrings);
+		free(dex_header);
+		return;
+	}
+
+	for (int protoindex = 0; protoindex < dex_header->protoIdsSize; protoindex++)
+	{
+		//得到方法参数签名
+		int si_buff_size = get_string_size_by_id(fp, dexstrings, dexprotos[protoindex].shortyIdx);
+		char * si_buff = (char *)malloc(si_buff_size + 1);
+		if (si_buff == NULL) {
+			goto end;
+		}
+		if (!get_string_by_id(fp, dexstrings, dexprotos[protoindex].shortyIdx, si_buff)) {
+			free(si_buff);
+			goto end;
+		}
+
+		//得到返回值
+		int return_buff_size = get_string_size_by_id(fp, dexstrings, dextypes[dexprotos[protoindex].returnTypeIdx].descriptorIdx);
+		char * return_buff = (char *)malloc(return_buff_size + 1);
+		if (return_buff == NULL) {
+			goto end;
+		}
+		if (!get_string_by_id(fp, dexstrings, dextypes[dexprotos[protoindex].returnTypeIdx].descriptorIdx, return_buff)) {
+			free(si_buff);
+			free(return_buff);
+			goto end;
+		}
+
+		//得到参数列表
+		u4 parameters_offset = dexprotos[protoindex].parametersOff;
+		int param_size = 0;
+		if (parameters_offset)
+			param_size = get_param_size_by_offset(fp,dexstrings,dextypes, parameters_offset);
+
+		printf("%-10d %-10s %s  %d\n", protoindex, si_buff, return_buff, param_size);
+
+		free(return_buff);
+		free(si_buff);
+	}
+
+end:
+	free(dexprotos);
+	free(dextypes);
+	free(dexstrings);
+	free(dex_header);
 }
 
 //解析类型表
@@ -112,7 +197,7 @@ void dex_types(FILE * fp) {
 			free(temp);
 			goto end;
 		}
-		printf("%d\t  %s \n", typeIndex,temp);
+		printf("%d\t  %s \n", typeIndex, temp);
 		free(temp);
 	}
 
@@ -216,6 +301,48 @@ int get_string_size_by_id(FILE *fp, DexStringId * dexstrings, int id) {
 	return size;
 }
 
+//得到参数列表字符串大小
+int get_param_size_by_offset(FILE *fp, DexStringId * dexstrings, DexTypeId * dextypes, u4 offset) {
+	fp_move(fp, offset);
+	int result = 0;
+	int size = 0;
+	int buff_size = 0;
+	result = fread(&size, sizeof(u4), 1, fp);
+	if (result == 0) {
+		printf("READ ERROR\n");
+		return -1;
+	}
+
+	DexTypeList * dextypelist = (DexTypeList *)malloc(sizeof(u4) + sizeof(DexTypeItem)*size);
+	if (dextypelist== NULL) {
+		printf("dextypelist malloc ERROR\n");
+		free(dextypelist);
+		return -1;
+	}
+	fp_move(fp, offset);
+	result = fread(dextypelist, sizeof(u4) + sizeof(DexTypeItem )*size, 1, fp);
+	if (result == 0) {
+		printf("READ ERROR\n");
+		free(dextypelist);
+		return -1;
+	}
+
+	for (int i = 0; i < size; i++)
+	{
+		fp_move(fp, offset + 4 + i * sizeof(DexTypeItem));
+		result = fread(&dextypelist->list[i], sizeof(DexTypeItem ), 1, fp);
+		if (result == 0) {
+			printf("READ ERROR\n");
+			return -1;
+		}
+		u4 descriptorIdx = dextypes[dextypelist->list[i].typeIdx].descriptorIdx;
+		buff_size += get_string_size_by_id(fp,dexstrings, descriptorIdx);
+	}
+
+	free(dextypelist);
+	return buff_size;
+}
+
 //得到字符表指定id字符串
 bool get_string_by_id(FILE *fp, DexStringId * dexstrings, int id, char * buff) {
 	u4 offset = dexstrings[id].stringDataOff;
@@ -229,7 +356,7 @@ bool get_string_by_id(FILE *fp, DexStringId * dexstrings, int id, char * buff) {
 		return false;
 	}
 
-	result = fread(buff, 1, size+1, fp);
+	result = fread(buff, 1, size + 1, fp);
 	if (result == 0) {
 		printf("READ ERROR\n");
 		return false;
@@ -257,6 +384,27 @@ DexStringId * get_dexstrings(FILE * fp, u4 offset, int size) {
 		return NULL;
 	}
 	return dexstrings;
+}
+
+//得到方法声明表 释放内存
+DexProtoId * get_dexprotos(FILE * fp, u4 offset, int size) {
+	DexProtoId * dexprotos = (DexProtoId *)malloc(sizeof(DexProtoId)*size);
+	if (dexprotos == NULL) {
+		printf("dexprotos malloc error\n");
+		return NULL;
+	}
+	memset(dexprotos, 0, sizeof(sizeof(DexProtoId)*size));
+
+	int result = 0;
+	//读取数据
+	fp_move(fp, offset);
+	result = fread(dexprotos, sizeof(DexProtoId), size, fp);
+	if (result == 0) {
+		printf("READ ERROR\n");
+		free(dexprotos);
+		return NULL;
+	}
+	return dexprotos;
 }
 
 //得到类型表 释放内存
