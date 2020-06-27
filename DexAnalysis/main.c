@@ -17,6 +17,7 @@ int get_param_size_by_offset(FILE *fp, DexStringId * dexstrings, DexTypeId * dex
 
 DexStringId * get_dexstrings(FILE * fp, u4 offset, int size);
 bool get_string_by_id(FILE *fp, DexStringId * dexstrings, int id, char * buff);
+bool get_param_string_by_offset(FILE *fp, DexStringId * dexstrings, DexTypeId * dextypes, u4 offset, char* buff);
 
 
 DexHeader* get_dex__header(FILE * fp);
@@ -138,11 +139,35 @@ void dex_proto(FILE * fp) {
 		//得到参数列表
 		u4 parameters_offset = dexprotos[protoindex].parametersOff;
 		int param_size = 0;
-		if (parameters_offset)
-			param_size = get_param_size_by_offset(fp,dexstrings,dextypes, parameters_offset);
+		char * param_buff = NULL;
 
-		printf("%-10d %-10s %s  %d\n", protoindex, si_buff, return_buff, param_size);
+		if (parameters_offset) {
+			param_size = get_param_size_by_offset(fp, dexstrings, dextypes, parameters_offset);
+			param_buff = (char *)malloc(param_size + 1);
+			memset(param_buff, 0, param_size + 1);
+			if (!get_param_string_by_offset(fp, dexstrings, dextypes, parameters_offset, param_buff)) {
+				if (param_buff != NULL) {
+					free(param_buff);
+				}
+				free(return_buff);
+				free(si_buff);
+				goto end;
+			}
+		}
+		else
+		{
+			param_buff = (char *)malloc(1);
+			memset(param_buff, 0, 1);
+		}
 
+		
+
+		printf("%-10d %-10s   (%s)%s\n", protoindex, si_buff, param_buff, return_buff);
+
+
+		if (param_buff != NULL) {
+			free(param_buff);
+		}
 		free(return_buff);
 		free(si_buff);
 	}
@@ -301,6 +326,56 @@ int get_string_size_by_id(FILE *fp, DexStringId * dexstrings, int id) {
 	return size;
 }
 
+//得到参数列表字符串
+bool get_param_string_by_offset(FILE *fp, DexStringId * dexstrings, DexTypeId * dextypes, u4 offset, char* buff) {
+	fp_move(fp, offset);
+	int result = 0;
+	int size = 0;
+	char * buff_temp = buff;
+
+	result = fread(&size, sizeof(u4), 1, fp);
+	if (result == 0) {
+		printf("READ ERROR\n");
+		return false;
+	}
+
+	DexTypeList * dextypelist = (DexTypeList *)malloc(sizeof(u4) + sizeof(DexTypeItem)*size);
+	if (dextypelist == NULL) {
+		printf("dextypelist malloc ERROR\n");
+		free(dextypelist);
+		return false;
+	}
+	fp_move(fp, offset);
+	result = fread(dextypelist, sizeof(u4) + sizeof(DexTypeItem)*size, 1, fp);
+	if (result == 0) {
+		printf("READ ERROR\n");
+		free(dextypelist);
+		return false;
+	}
+
+	for (int i = 0; i < size; i++)
+	{
+		int buf_size = 0;
+
+		fp_move(fp, offset + 4 + i * sizeof(DexTypeItem));
+		result = fread(&dextypelist->list[i], sizeof(DexTypeItem), 1, fp);
+		if (result == 0) {
+			printf("READ ERROR\n");
+			return false;
+		}
+		u4 descriptorIdx = dextypes[dextypelist->list[i].typeIdx].descriptorIdx;
+		buf_size = get_string_size_by_id(fp, dexstrings, descriptorIdx);
+		if (!get_string_by_id(fp, dexstrings, descriptorIdx, buff_temp)) {
+			return false;
+		}
+		buff_temp += buf_size;
+	}
+
+	free(dextypelist);
+
+	return true;
+}
+
 //得到参数列表字符串大小
 int get_param_size_by_offset(FILE *fp, DexStringId * dexstrings, DexTypeId * dextypes, u4 offset) {
 	fp_move(fp, offset);
@@ -314,13 +389,13 @@ int get_param_size_by_offset(FILE *fp, DexStringId * dexstrings, DexTypeId * dex
 	}
 
 	DexTypeList * dextypelist = (DexTypeList *)malloc(sizeof(u4) + sizeof(DexTypeItem)*size);
-	if (dextypelist== NULL) {
+	if (dextypelist == NULL) {
 		printf("dextypelist malloc ERROR\n");
 		free(dextypelist);
 		return -1;
 	}
 	fp_move(fp, offset);
-	result = fread(dextypelist, sizeof(u4) + sizeof(DexTypeItem )*size, 1, fp);
+	result = fread(dextypelist, sizeof(u4) + sizeof(DexTypeItem)*size, 1, fp);
 	if (result == 0) {
 		printf("READ ERROR\n");
 		free(dextypelist);
@@ -330,13 +405,13 @@ int get_param_size_by_offset(FILE *fp, DexStringId * dexstrings, DexTypeId * dex
 	for (int i = 0; i < size; i++)
 	{
 		fp_move(fp, offset + 4 + i * sizeof(DexTypeItem));
-		result = fread(&dextypelist->list[i], sizeof(DexTypeItem ), 1, fp);
+		result = fread(&dextypelist->list[i], sizeof(DexTypeItem), 1, fp);
 		if (result == 0) {
 			printf("READ ERROR\n");
 			return -1;
 		}
 		u4 descriptorIdx = dextypes[dextypelist->list[i].typeIdx].descriptorIdx;
-		buff_size += get_string_size_by_id(fp,dexstrings, descriptorIdx);
+		buff_size += get_string_size_by_id(fp, dexstrings, descriptorIdx);
 	}
 
 	free(dextypelist);
