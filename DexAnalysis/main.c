@@ -8,9 +8,11 @@ void dex_header(FILE * fp);
 void dex_strings(FILE * fp, int page, int limit);
 void dex_types(FILE * fp);
 void dex_proto(FILE * fp);
+void dex_field(FILE * fp);
 
 DexTypeId * get_dextypes(FILE * fp, u4 offset, int size);
 DexProtoId * get_dexprotos(FILE * fp, u4 offset, int size);
+DexFieldId * get_fields(FILE * fp, u4 offset, int size);
 
 int get_string_size_by_id(FILE *fp, DexStringId * dexstrings, int id);
 int get_param_size_by_offset(FILE *fp, DexStringId * dexstrings, DexTypeId * dextypes, u4 offset);
@@ -24,7 +26,7 @@ DexHeader* get_dex__header(FILE * fp);
 
 int main(int argc, char* argv[]) {
 
-	/*if (!strcmp(argv[1], "-help")) {
+	if (!strcmp(argv[1], "-help")) {
 		help();
 		exit(0);
 	}
@@ -33,7 +35,7 @@ int main(int argc, char* argv[]) {
 	{
 		printf("invalid arguments\n");
 		exit(0);
-	}*/
+	}
 
 	FILE *fp;
 	errno_t err = 0;
@@ -47,8 +49,8 @@ int main(int argc, char* argv[]) {
 		exit(0);
 	}
 	printf("-----------------------------------------------------------------------------------------------------\n");
-	dex_proto(fp);
-	/*if (!strcmp(argv[1], "-h")) {
+	//dex_field(fp);
+	if (!strcmp(argv[1], "-h")) {
 		dex_header(fp);
 	}
 	else if (!strcmp(argv[1], "-s")) {
@@ -60,8 +62,9 @@ int main(int argc, char* argv[]) {
 	else if (!strcmp(argv[1], "-p")) {
 		dex_proto(fp);
 	}
-	else if (!strcmp(argv[1], "-r")) {
-	}*/
+	else if (!strcmp(argv[1], "-f")) {
+		dex_field(fp);
+	}
 	//help();
 
 	if (fp) {
@@ -75,6 +78,80 @@ int main(int argc, char* argv[]) {
 		}
 	}
 	return 0;
+}
+
+//解析字段表
+void dex_field(FILE * fp) {
+	//得到dex头
+	DexHeader* dex_header = get_dex__header(fp);
+	if (dex_header == NULL) {
+		printf("dex_header error\n");
+		return;
+	}
+	//得到字符串表
+	DexStringId * dexstrings = get_dexstrings(fp, dex_header->stringIdsOff, dex_header->stringIdsSize);
+	if (dexstrings == NULL) {
+		printf("dexstrings error\n");
+		free(dex_header);
+		return;
+	}
+
+	//得到类型表
+	DexTypeId * dextypes = get_dextypes(fp, dex_header->typeIdsOff, dex_header->typeIdsSize);
+	if (dextypes == NULL) {
+		printf("dextypes error\n");
+		free(dexstrings);
+		free(dex_header);
+		return;
+	}
+
+	//得到字典表 
+	DexFieldId * dexFidelds = get_fields(fp,dex_header->fieldIdsOff,dex_header->fieldIdsSize);
+	if (dexFidelds == NULL) {
+		printf("dexFidelds error\n");
+		free(dextypes);
+		free(dexstrings);
+		free(dex_header);
+		return;
+	}
+
+	for (int fideldindex = 0; fideldindex < dex_header->fieldIdsSize; fideldindex++)
+	{
+		int class_size = get_string_size_by_id(fp, dexstrings, dextypes[dexFidelds[fideldindex].classIdx].descriptorIdx);
+		char * class_buf = (char *)malloc(class_size+1);
+		if (dextypes == NULL) {
+			goto end;
+		}
+		memset(class_buf, 0, class_size + 1);
+		get_string_by_id(fp, dexstrings, dextypes[dexFidelds[fideldindex].classIdx].descriptorIdx,class_buf);
+
+		int type_size = get_string_size_by_id(fp, dexstrings, dextypes[dexFidelds[fideldindex].typeIdx].descriptorIdx);
+		char * type_buf = (char *)malloc(type_size + 1);
+		if (type_buf == NULL) {
+			goto end;
+		}
+		memset(type_buf, 0, type_size + 1);
+		get_string_by_id(fp, dexstrings, dextypes[dexFidelds[fideldindex].typeIdx].descriptorIdx, type_buf);
+
+		int name_size = get_string_size_by_id(fp, dexstrings, dexFidelds[fideldindex].nameIdx);
+		char * name_buf = (char *)malloc(name_size + 1);
+		if (name_buf == NULL) {
+			goto end;
+		}
+		memset(name_buf, 0, name_size + 1);
+		get_string_by_id(fp, dexstrings, dexFidelds[fideldindex].nameIdx, name_buf);
+
+
+		printf("%s\t %s\t %s\n", class_buf, type_buf, name_buf);
+		free(name_buf);
+		free(type_buf);
+		free(class_buf);
+	}
+end:
+	free(dexFidelds);
+	free(dextypes);
+	free(dexstrings);
+	free(dex_header);
 }
 
 //解析类型表
@@ -461,6 +538,27 @@ DexStringId * get_dexstrings(FILE * fp, u4 offset, int size) {
 	return dexstrings;
 }
 
+//得到字段表 释放内存
+DexFieldId * get_fields(FILE * fp, u4 offset, int size) {
+	DexFieldId * dexfields = (DexFieldId *)malloc(sizeof(DexFieldId)*size);
+	if (dexfields == NULL) {
+		printf("dexfields malloc error\n");
+		return NULL;
+	}
+	memset(dexfields, 0, sizeof(sizeof(DexFieldId)*size));
+
+	int result = 0;
+	//读取数据
+	fp_move(fp, offset);
+	result = fread(dexfields, sizeof(DexFieldId), size, fp);
+	if (result == 0) {
+		printf("READ ERROR\n");
+		free(dexfields);
+		return NULL;
+	}
+	return dexfields;
+}
+
 //得到方法声明表 释放内存
 DexProtoId * get_dexprotos(FILE * fp, u4 offset, int size) {
 	DexProtoId * dexprotos = (DexProtoId *)malloc(sizeof(DexProtoId)*size);
@@ -590,8 +688,9 @@ void help()
 {
 	printf("这是Shark Chilli的解析器0.0,有疑问可以发送到我的邮箱:1243596620@qq.com\n");
 	printf("-h            :头部信息\n");
-	printf("-S            :节区表信息\n");
-	printf("-s            :符号表信息\n");
-	printf("-l            :程序头信息\n");
-	printf("-r            :重定位表信息\n");
+	printf("-s            :字符串表信息\n");
+	printf("-t            :类型表信息\n");
+	printf("-p            :方法声明信息\n");
+	printf("-f            :字段表信息\n");
+	printf("Method表 与 Class表不再重复\n");
 }
